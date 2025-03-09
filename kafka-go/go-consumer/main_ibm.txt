@@ -1,0 +1,350 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"math/rand"
+	"os"
+	"os/signal"
+	"sync"
+	"time"
+
+	"github.com/IBM/sarama"
+)
+
+// Stock structure matching the producer
+type Stock struct {
+	Symbol string  `json:"symbol"`
+	Price  float64 `json:"price"`
+	Volume int     `json:"volume"`
+}
+
+// MessageError represents a failed message for the DLQ
+type MessageError struct {
+	OriginalMessage []byte    `json:"original_message"`
+	OriginalTopic   string    `json:"original_topic"`
+	ErrorMessage    string    `json:"error_message"`
+	Timestamp       time.Time `json:"timestamp"`
+	RetryCount      int       `json:"retry_count"`
+}
+
+const (
+	DLQ_TOPIC       = "dead-letter-queue"
+	MAX_RETRY_COUNT = 3
+	RETRY_TOPIC     = "retry-topic"
+)
+
+func main() {
+	// Set up Sarama log to stdout
+	sarama.Logger = log.New(os.Stdout, "[sarama] ", log.LstdFlags)
+
+	// Topics to consume
+	topics := []string{"stock-topic", "test-from-go", RETRY_TOPIC}
+
+	// Consumer configuration
+	config := sarama.NewConfig()
+	config.Consumer.Return.Errors = true
+	config.Consumer.Offsets.Initial = sarama.OffsetNewest // Start from newest message
+	config.Consumer.Group.Rebalance.Strategy = sarama.NewBalanceStrategyRoundRobin()
+
+	// Producer configuration for DLQ and retry
+	config.Producer.RequiredAcks = sarama.WaitForAll
+	config.Producer.Retry.Max = 5
+	config.Producer.Return.Successes = true
+
+	// Create Kafka client
+	client, err := sarama.NewClient([]string{"localhost:9092"}, config)
+	if err != nil {
+		log.Fatalf("Error creating Kafka client: %v", err)
+	}
+	defer client.Close()
+
+	// Create producer for DLQ and retry messages
+	producer, err := sarama.NewSyncProducerFromClient(client)
+	if err != nil {
+		log.Fatalf("Error creating producer: %v", err)
+	}
+	defer producer.Close()
+
+	// Create consumer group
+	consumerGroup, err := sarama.NewConsumerGroupFromClient("stock-consumer-group", client)
+	if err != nil {
+		log.Fatalf("Error creating consumer group: %v", err)
+	}
+	defer func() {
+		if err := consumerGroup.Close(); err != nil {
+			log.Fatalf("Error closing consumer group: %v", err)
+		}
+	}()
+
+	// Create a context for controlled shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create consumer handler with DLQ support
+	handler := ConsumerGroupHandler{
+		ready:    make(chan bool),
+		producer: producer,
+	}
+
+	// Set up a wait group to know when consumer finishes
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// Start consuming in a goroutine
+	go func() {
+		defer wg.Done()
+		for {
+			// Consume will block until the context is cancelled or an error occurs
+			if err := consumerGroup.Consume(ctx, topics, &handler); err != nil {
+				log.Printf("Error from consumer group: %v", err)
+				// Only exit for critical errors, otherwise continue
+				if err == sarama.ErrClosedConsumerGroup {
+					return
+				}
+			}
+
+			// Check if context was cancelled, meaning we should stop
+			if ctx.Err() != nil {
+				return
+			}
+
+			// Reset the consumer session so it can be created again
+			handler.ready = make(chan bool)
+		}
+	}()
+
+	// Wait until the consumer is ready
+	<-handler.ready
+	log.Println("Consumer group started with Dead Letter Queue support")
+
+	// Wait for termination signal
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+	<-signals
+	fmt.Println("Interrupt detected, shutting down...")
+	cancel()  // Cancel context to signal consumer group to stop
+	wg.Wait() // Wait for consumer to finish
+	log.Println("Consumer terminated")
+}
+
+// ConsumerGroupHandler implements the sarama.ConsumerGroupHandler interface
+type ConsumerGroupHandler struct {
+	ready    chan bool
+	producer sarama.SyncProducer
+}
+
+// Setup is run at the beginning of a new session
+func (h *ConsumerGroupHandler) Setup(sarama.ConsumerGroupSession) error {
+	close(h.ready)
+	return nil
+}
+
+// Cleanup is run at the end of a session
+func (h *ConsumerGroupHandler) Cleanup(sarama.ConsumerGroupSession) error {
+	return nil
+}
+
+// ConsumeClaim must start a consumer loop of ConsumerGroupClaim's Messages()
+func (h *ConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+	for {
+		select {
+		case msg, ok := <-claim.Messages():
+			if !ok {
+				return nil
+			}
+
+			var retryCount int
+			var originalTopic string = msg.Topic
+
+			// Check if this is a retry message
+			if msg.Topic == RETRY_TOPIC {
+				for _, header := range msg.Headers {
+					if string(header.Key) == "retry-count" {
+						retryCount = int(header.Value[0])
+					} else if string(header.Key) == "original-topic" {
+						originalTopic = string(header.Value)
+					}
+				}
+			}
+
+			log.Printf("Processing message from topic %s (retry count: %d)", originalTopic, retryCount)
+
+			// Process message based on topic
+			var err error
+			if originalTopic == "stock-topic" {
+				err = processStockMessage(msg)
+			}
+
+			// else {
+			// 	err = processRegularMessage(msg)
+			// }
+
+			// Handle processing errors with DLQ
+			if err != nil {
+				log.Printf("Error processing message: %v", err)
+				h.handleProcessingError(msg, err, retryCount)
+			} else {
+				log.Printf("Successfully processed message")
+			}
+
+			// if err != nil {
+			// 	log.Printf("Error processing message: %v", err)
+			// } else {
+			// 	log.Printf("Successfully processed message")
+			// }
+
+			// Mark message as processed
+			session.MarkMessage(msg, "")
+
+		case <-session.Context().Done():
+			return nil
+		}
+	}
+}
+
+// handleProcessingError decides whether to retry a message or send to DLQ
+func (h *ConsumerGroupHandler) handleProcessingError(msg *sarama.ConsumerMessage, err error, retryCount int) {
+	// Increment retry count
+	retryCount++
+
+	if retryCount <= MAX_RETRY_COUNT {
+		// Send to retry topic with backoff
+		log.Printf("Sending message to retry topic (attempt %d of %d)", retryCount, MAX_RETRY_COUNT)
+		if err := h.sendToRetryTopic(msg, retryCount, err); err != nil {
+			log.Printf("Failed to send to retry topic: %v", err)
+			// If we can't send to retry, send directly to DLQ
+			h.sendToDLQ(msg, err, retryCount)
+		}
+	} else {
+		// After max retries, send to DLQ
+		log.Printf("Max retries exceeded, sending message to DLQ")
+		h.sendToDLQ(msg, err, retryCount)
+	}
+}
+
+// sendToRetryTopic publishes a message to the retry topic with exponential backoff
+func (h *ConsumerGroupHandler) sendToRetryTopic(msg *sarama.ConsumerMessage, retryCount int, processingErr error) error {
+	headers := []sarama.RecordHeader{
+		{
+			Key:   []byte("retry-count"),
+			Value: []byte{byte(retryCount)},
+		},
+		{
+			Key:   []byte("original-topic"),
+			Value: []byte(msg.Topic),
+		},
+		{
+			Key:   []byte("error-message"),
+			Value: []byte(processingErr.Error()),
+		},
+		{
+			Key:   []byte("retry-timestamp"),
+			Value: []byte(fmt.Sprintf("%d", time.Now().UnixNano())),
+		},
+	}
+
+	retryMsg := &sarama.ProducerMessage{
+		Topic:     RETRY_TOPIC,
+		Value:     sarama.ByteEncoder(msg.Value),
+		Headers:   headers,
+		Timestamp: time.Now(),
+	}
+
+	// Copy the original key if present
+	if msg.Key != nil {
+		retryMsg.Key = sarama.ByteEncoder(msg.Key)
+	}
+
+	// Calculate exponential backoff delay
+	backoffTime := calculateBackoff(retryCount)
+
+	// Simulate backoff by waiting (normally this would be handled by a delay queue)
+	// In production, use a scheduling system instead of sleeping
+	time.Sleep(backoffTime)
+
+	// Send to retry topic
+	_, _, err := h.producer.SendMessage(retryMsg)
+	return err
+}
+
+// sendToDLQ sends a failed message to the Dead Letter Queue
+func (h *ConsumerGroupHandler) sendToDLQ(msg *sarama.ConsumerMessage, processingErr error, retryCount int) {
+	// Create DLQ message with error details
+	dlqMessage := MessageError{
+		OriginalMessage: msg.Value,
+		OriginalTopic:   msg.Topic,
+		ErrorMessage:    processingErr.Error(),
+		Timestamp:       time.Now(),
+		RetryCount:      retryCount,
+	}
+
+	// Serialize to JSON
+	valueBytes, err := json.Marshal(dlqMessage)
+	if err != nil {
+		log.Printf("Error serializing DLQ message: %v", err)
+		return
+	}
+
+	// Create producer message
+	dlqMsg := &sarama.ProducerMessage{
+		Topic: DLQ_TOPIC,
+		Value: sarama.ByteEncoder(valueBytes),
+		Headers: []sarama.RecordHeader{
+			{
+				Key:   []byte("error-type"),
+				Value: []byte(fmt.Sprintf("%T", processingErr)),
+			},
+		},
+		Timestamp: time.Now(),
+	}
+
+	// Copy the original key if present
+	if msg.Key != nil {
+		dlqMsg.Key = sarama.ByteEncoder(msg.Key)
+	}
+
+	// Send to DLQ topic
+	_, _, err = h.producer.SendMessage(dlqMsg)
+	if err != nil {
+		log.Printf("Failed to send message to DLQ: %v", err)
+	} else {
+		log.Printf("Message sent to DLQ")
+	}
+}
+
+// calculateBackoff calculates exponential backoff time
+func calculateBackoff(retryCount int) time.Duration {
+	// Simple exponential backoff: 2^retry * 100ms
+	backoffMs := 1 << uint(retryCount) * 100
+	return time.Duration(backoffMs) * time.Millisecond
+}
+
+// processStockMessage processes a stock message
+func processStockMessage(msg *sarama.ConsumerMessage) error {
+	var stock Stock
+	if err := json.Unmarshal(msg.Value, &stock); err != nil {
+		return fmt.Errorf("failed to parse stock message: %w", err)
+	}
+
+	// Simulate random processing errors (20% chance)
+	if rand.Intn(100) < 50 { // 50% chance
+		return fmt.Errorf("random processing error")
+	}
+	log.Printf("Processed stock: %s at $%.2f (volume: %d)",
+		stock.Symbol, stock.Price, stock.Volume)
+	return nil
+}
+
+// // processRegularMessage processes a regular message
+// func processRegularMessage(msg *sarama.ConsumerMessage) error {
+// 	// Simulate random processing errors (10% chance)
+// 	if time.Now().UnixNano()%10 == 0 {
+// 		return fmt.Errorf("simulated random processing error")
+// 	}
+
+// 	log.Printf("Processed message: %s", string(msg.Value))
+// 	return nil
+// }

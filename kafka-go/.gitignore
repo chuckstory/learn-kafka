@@ -1,0 +1,44 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go specific
+/vendor/
+/go.work
+
+# Binary output directories
+/bin/
+/dist/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Log files
+*.log
+
+# Environment variables
+.env
+.env.local
+
+# Dependency directories (remove these if you prefer to check in your dependencies)
+/vendor/
+
+# Output of the go coverage tool
+*.coverprofile
+
+# Kafka specific
+.kafka-data/
+*.offset
+
+# Temporary files
+/tmp/
+*.tmp
