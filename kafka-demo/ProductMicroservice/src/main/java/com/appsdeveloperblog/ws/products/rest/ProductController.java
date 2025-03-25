@@ -1,7 +1,7 @@
-package com.appsdeveloperblog.ws.product.rest;
+package com.appsdeveloperblog.ws.products.rest;
 
 
-import com.appsdeveloperblog.ws.product.service.ProductService;
+import com.appsdeveloperblog.ws.products.service.ProductService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;

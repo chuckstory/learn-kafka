@@ -1,4 +1,4 @@
-package com.appsdeveloperblog.ws.product;
+package com.appsdeveloperblog.ws.products;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

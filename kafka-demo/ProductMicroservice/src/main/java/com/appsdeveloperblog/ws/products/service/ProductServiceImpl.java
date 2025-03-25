@@ -1,8 +1,8 @@
-package com.appsdeveloperblog.ws.product.service;
+package com.appsdeveloperblog.ws.products.service;
 
 
 import com.appsdeveloperblog.ws.core.ProductCreatedEvent;
-import com.appsdeveloperblog.ws.product.rest.CreateProductRestModel;
+import com.appsdeveloperblog.ws.products.rest.CreateProductRestModel;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,7 +12,6 @@ import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 @Service
 public class ProductServiceImpl implements ProductService {

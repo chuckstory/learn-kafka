@@ -1,4 +1,4 @@
-package com.appsdeveloperblog.ws.emailnotification;
+package com.appsdeveloperblog.ws.emailnotification.handler;
 
 import com.appsdeveloperblog.ws.core.ProductCreatedEvent;
 import com.appsdeveloperblog.ws.emailnotification.error.NotRetryableException;

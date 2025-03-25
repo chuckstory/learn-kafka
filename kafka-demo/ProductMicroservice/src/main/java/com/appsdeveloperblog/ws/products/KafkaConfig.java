@@ -1,4 +1,4 @@
-package com.appsdeveloperblog.ws.product;
+package com.appsdeveloperblog.ws.products;
 
 import com.appsdeveloperblog.ws.core.ProductCreatedEvent;
 import org.apache.kafka.clients.admin.NewTopic;

@@ -1,4 +1,4 @@
-package com.appsdeveloperblog.ws.product.rest;
+package com.appsdeveloperblog.ws.products.rest;
 
 
 import java.util.Date;
