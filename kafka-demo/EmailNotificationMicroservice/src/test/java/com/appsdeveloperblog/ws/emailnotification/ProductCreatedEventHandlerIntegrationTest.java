@@ -59,6 +59,7 @@ public class ProductCreatedEventHandlerIntegrationTest {
             productCreatedEvent.setPrice(new BigDecimal(10));
             productCreatedEvent.setQuantity(10);
             productCreatedEvent.setTitle("Product Title");
+            productCreatedEvent.setProductId(UUID.randomUUID().toString());
 
             String messageId = UUID.randomUUID().toString();
             String messageKey = productCreatedEvent.getProductId();
@@ -100,5 +101,9 @@ public class ProductCreatedEventHandlerIntegrationTest {
             assertEquals(messageId, messageIdCaptor.getValue());
             assertEquals(messageKey, messageKeyCaptor.getValue());
             assertEquals(productCreatedEvent.getProductId(), eventCaptor.getValue().getProductId());
+
+            //Printing the captured values
+            System.out.println("Captured Message ID: " + messageIdCaptor.getValue());
+            System.out.println("Captured Message Key: " + messageKeyCaptor.getValue());
         }
 }
