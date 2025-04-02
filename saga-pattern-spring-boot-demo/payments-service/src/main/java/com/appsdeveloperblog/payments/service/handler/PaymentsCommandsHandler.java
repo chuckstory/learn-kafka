@@ -2,6 +2,8 @@ package com.appsdeveloperblog.payments.service.handler;
 
 
 import com.appsdeveloperblog.core.dto.Payment;
+import com.appsdeveloperblog.core.dto.Product;
+import com.appsdeveloperblog.core.dto.commands.CancelProductReservationCommand;
 import com.appsdeveloperblog.core.dto.commands.ProcessPaymentCommand;
 import com.appsdeveloperblog.core.dto.events.PaymentFailedEvent;
 import com.appsdeveloperblog.core.dto.events.PaymentProcessedEvent;

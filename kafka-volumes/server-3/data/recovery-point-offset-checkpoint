@@ -1,5 +1,39 @@
 0
-3
-orders-events 2 0
+37
+__consumer_offsets 30 0
+payments-commands 2 0
+orders-commands 1 0
+__consumer_offsets 21 0
+__consumer_offsets 4 0
+products-commands 0 0
+orders-commands 0 0
+__consumer_offsets 9 0
+__consumer_offsets 46 0
+orders-commands 2 0
+__consumer_offsets 35 0
+__consumer_offsets 41 0
+__consumer_offsets 23 0
+__consumer_offsets 49 0
 orders-events 0 0
-orders-events 1 0
+__consumer_offsets 36 0
+products-commands 1 0
+__consumer_offsets 3 0
+products-commands 2 0
+orders-events 2 0
+__consumer_offsets 15 0
+__consumer_offsets 24 0
+payments-commands 1 0
+__consumer_offsets 38 0
+__consumer_offsets 17 0
+__consumer_offsets 19 0
+__consumer_offsets 43 0
+__consumer_offsets 6 0
+payments-events 0 0
+payments-commands 0 0
+__consumer_offsets 0 0
+__consumer_offsets 44 0
+__consumer_offsets 12 0
+__consumer_offsets 26 0
+__consumer_offsets 29 0
+__consumer_offsets 10 0
+__consumer_offsets 32 0

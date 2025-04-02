@@ -1,12 +1,7 @@
 package com.appsdeveloperblog.orders.saga;
 
-import com.appsdeveloperblog.core.dto.commands.ApproveOrderCommand;
-import com.appsdeveloperblog.core.dto.commands.ProcessPaymentCommand;
-import com.appsdeveloperblog.core.dto.commands.ReserveProductCommand;
-import com.appsdeveloperblog.core.dto.events.OrderApprovedEvent;
-import com.appsdeveloperblog.core.dto.events.OrderCreatedEvent;
-import com.appsdeveloperblog.core.dto.events.PaymentProcessedEvent;
-import com.appsdeveloperblog.core.dto.events.ProductReservedEvent;
+import com.appsdeveloperblog.core.dto.commands.*;
+import com.appsdeveloperblog.core.dto.events.*;
 import com.appsdeveloperblog.core.types.OrderStatus;
 import com.appsdeveloperblog.orders.service.OrderHistoryService;
 import org.springframework.beans.factory.annotation.Value;
@@ -79,4 +74,23 @@ public class OrderSaga {
     public  void handleEvent(@Payload OrderApprovedEvent event) {
         orderHistoryService.add(event.getOrderId(), OrderStatus.APPROVED);
     }
+
+    @KafkaHandler
+    public void handleEvent(@Payload PaymentFailedEvent event) {
+        CancelProductReservationCommand cancelProductReservationCommand = new CancelProductReservationCommand(
+                event.getProductId(),
+                event.getOrderId(),
+                event.getProductQuantity()
+        );
+
+        kafkaTemplate.send(productsCommandsTopicName, cancelProductReservationCommand);
+    }
+
+    @KafkaHandler
+    public void handleEvent(@Payload ProductReservationCancelledEvent event){
+        RejectOrderCommand rejectOrderCommand = new RejectOrderCommand(event.getOrderId());
+        kafkaTemplate.send(ordersCommandsTopicName, rejectOrderCommand);
+        orderHistoryService.add(event.getOrderId(), OrderStatus.REJECTED);
+    }
+
 }
